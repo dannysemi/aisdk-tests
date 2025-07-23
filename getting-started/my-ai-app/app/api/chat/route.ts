@@ -1,22 +1,36 @@
-import { CoreMessage, generateText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
-
-const openai = createOpenAI({
-  baseURL: "http://semi:8500/v1"
-});
+import { CoreMessage } from 'ai';
+import { MessagesService,
+  ChatService,
+  SystemService,
+  type SystemMessage,
+  type ProcessedMessages,
+  type LLMResponse } from '@/lib/plugins';
 
 export async function POST(req: Request) {
-  const { messages }: { messages: CoreMessage[] } = await req.json();
+  const { messages: userMessages }: { messages: CoreMessage[] } = await req.json();
+  const systemMessage: SystemMessage = SystemService.processSystem();
+  const processedMessages: ProcessedMessages = MessagesService.processMessages(userMessages);
+  try {
+    const result: LLMResponse = await ChatService.processChat(processedMessages.messages, systemMessage.systemMessage);
+    
+    const response = {
+      messages: [result.assistantMessage],
+      ...(process.env.NODE_ENV === 'development' ? {
+        _debug: {
+          ...result.debug,
+          processedMessages,
+          systemMessage
+        }
+      } : {})
+    };
 
-  //console.log("Received messages:", messages);
+    return Response.json(response);
 
-  const { response } = await generateText({
-    model: openai('deepseek/deepseek-r1-0528-qwen3-8b'),
-    system: 'You are a helpful assistant.',
-    messages,
-  });
-
-  //console.log("Generated response:", response);
-
-  return Response.json({ messages: response.messages });
+  } catch (error) {
+    console.error('Error processing chat request:', error);
+    return Response.json(
+      { error: 'Failed to process request' },
+      { status: 500 }
+    );
+  }
 }
